@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D Vector Search Performance Visualization</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        #plot {
+            width: 900px;
+            height: 700px;
+            margin: 0 auto;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Semantic search performance: Latency vs Recall vs Hot RAM</h1>
+        <div id="plot"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Data for 7-bit quantization
+            const latency7 = [1.859, 2.128, 2.183, 2.158, 2.588, 3.055];
+            const ram7 = [19550.323, 19550.323, 19550.323, 19550.323, 19550.323, 19550.323];
+            const recall7 = [0.959, 0.974, 0.976, 0.979, 0.981, 0.985];
+            const overSample7 = [1.0, 1.1, 1.2, 1.5, 2.0, 3.0];
+            
+            // Data for 4-bit quantization
+            const latency4 = [1.654, 1.816, 1.769, 1.874, 2.096, 2.351];
+            const ram4 = [9784.698, 9784.698, 9784.698, 9784.698, 9784.698, 9784.698];
+            const recall4 = [0.926, 0.955, 0.967, 0.977, 0.981, 0.984];
+            const overSample4 = [1.0, 1.1, 1.2, 1.5, 2.0, 3.0];
+            
+            // Data for 1-bit quantization
+            const latency1 = [1.547, 1.580, 1.592, 1.683, 1.799, 2.051];
+            const ram1 = [2508.163, 2508.163, 2508.163, 2508.163, 2508.163, 2508.163];
+            const recall1 = [0.848, 0.885, 0.911, 0.951, 0.971, 0.982];
+            const overSample1 = [1.0, 1.1, 1.2, 1.5, 2.0, 3.0];
+            
+            // Create custom hover texts
+            const hoverText7 = latency7.map((val, i) => 
+                `Latency: ${val.toFixed(3)} ms<br>` +
+                `Recall: ${recall7[i].toFixed(4)}<br>` +
+                `RAM: ${ram7[i].toFixed(1)} MB<br>` +
+                `overSample: ${overSample7[i]}`
+            );
+            
+            const hoverText4 = latency4.map((val, i) => 
+                `Latency: ${val.toFixed(3)} ms<br>` +
+                `Recall: ${recall4[i].toFixed(4)}<br>` +
+                `RAM: ${ram4[i].toFixed(1)} MB<br>` +
+                `overSample: ${overSample4[i]}`
+            );
+            
+            const hoverText1 = latency1.map((val, i) => 
+                `Latency: ${val.toFixed(3)} ms<br>` +
+                `Recall: ${recall1[i].toFixed(4)}<br>` +
+                `RAM: ${ram1[i].toFixed(1)} MB<br>` +
+                `overSample: ${overSample1[i]}`
+            );
+
+            // Data for each quantization level
+            const bits7 = {
+                x: latency7,  // latency
+                y: ram7,      // vec_ram
+                z: recall7,   // recall
+                text: hoverText7,
+                hoverinfo: 'text',
+                mode: 'markers',
+                marker: {
+                    size: 5,  // Smaller dot size
+                    color: 'rgb(255, 65, 54)',
+                    line: {
+                        width: 1,
+                        color: 'rgb(150, 30, 30)'
+                    },
+                    opacity: 0.8
+                },
+                type: 'scatter3d',
+                name: '7-bit Quantization'
+            };
+
+            const bits4 = {
+                x: latency4,  // latency
+                y: ram4,      // vec_ram
+                z: recall4,   // recall
+                text: hoverText4,
+                hoverinfo: 'text',
+                mode: 'markers',
+                marker: {
+                    size: 5,  // Smaller dot size
+                    color: 'rgb(33, 150, 243)',
+                    line: {
+                        width: 1,
+                        color: 'rgb(25, 100, 150)'
+                    },
+                    opacity: 0.8
+                },
+                type: 'scatter3d',
+                name: '4-bit Quantization'
+            };
+
+            const bits1 = {
+                x: latency1,  // latency
+                y: ram1,      // vec_ram
+                z: recall1,   // recall
+                text: hoverText1,
+                hoverinfo: 'text',
+                mode: 'markers',
+                marker: {
+                    size: 5,  // Smaller dot size
+                    color: 'rgb(76, 175, 80)',
+                    line: {
+                        width: 1,
+                        color: 'rgb(50, 125, 50)'
+                    },
+                    opacity: 0.8
+                },
+                type: 'scatter3d',
+                name: '1-bit Quantization'
+            };
+
+            // Add lines to connect points within each quantization level
+            const line7 = {
+                x: latency7,
+                y: ram7,
+                z: recall7,
+                mode: 'lines',
+                line: {
+                    color: 'rgb(255, 65, 54)',
+                    width: 2
+                },
+                opacity: 0.5,
+                type: 'scatter3d',
+                name: '7-bit Path',
+                showlegend: false,
+                hoverinfo: 'none'
+            };
+
+            const line4 = {
+                x: latency4,
+                y: ram4,
+                z: recall4,
+                mode: 'lines',
+                line: {
+                    color: 'rgb(33, 150, 243)',
+                    width: 2
+                },
+                opacity: 0.5,
+                type: 'scatter3d',
+                name: '4-bit Path',
+                showlegend: false,
+                hoverinfo: 'none'
+            };
+
+            const line1 = {
+                x: latency1,
+                y: ram1,
+                z: recall1,
+                mode: 'lines',
+                line: {
+                    color: 'rgb(76, 175, 80)',
+                    width: 2
+                },
+                opacity: 0.5,
+                type: 'scatter3d',
+                name: '1-bit Path',
+                showlegend: false,
+                hoverinfo: 'none'
+            };
+
+            const data = [bits7, bits4, bits1, line7, line4, line1];
+
+            const layout = {
+                title: {
+                    text: 'Vector Search Performance: Latency vs Hot RAM Usage vs Recall',
+                    font: {
+                        size: 20
+                    }
+                },
+                autosize: true,
+                scene: {
+                    xaxis: {
+                        title: 'Latency (ms)',
+                        titlefont: {
+                            color: '#000',
+                            size: 14
+                        }
+                    },
+                    yaxis: {
+                        title: 'Hot RAM Usage (MB)',
+                        titlefont: {
+                            color: '#000',
+                            size: 14
+                        },
+                        type: 'log'  // Use log scale for better visualization of RAM usage
+                    },
+                    zaxis: {
+                        title: 'Recall',
+                        titlefont: {
+                            color: '#000',
+                            size: 14
+                        },
+                        range: [0.82, 1.0]  // Start recall axis from a reasonable minimum
+                    },
+                    camera: {
+                        eye: {x: 1.8, y: 1.5, z: 1.5}  // Adjusted for better viewing angle with new axis arrangement
+                    }
+                },
+                margin: {
+                    l: 0,
+                    r: 0,
+                    b: 0,
+                    t: 50
+                },
+                legend: {
+                    x: 0.8,
+                    y: 0.9
+                },
+                hovermode: 'closest'
+            };
+
+            Plotly.newPlot('plot', data, layout, {responsive: true});
+        });
+    </script>
+</body>
+</html>
