@@ -52,7 +52,7 @@ PARAMS = {
   #'ndoc': (10000, 100000, 200000, 500000),
   #'ndoc': (2_000_000,),
   #'ndoc': (1_000_000,),
-  "ndoc": (500_000,),
+  "ndoc": (1_000_000,),
   #'ndoc': (50_000,),
   #'maxConn': (32, 64, 96),
   "maxConn": (64,),
@@ -66,16 +66,18 @@ PARAMS = {
   #'quantizeBits': (32, 7, 4),
   "numMergeWorker": (12,),
   "numMergeThread": (4,),
-  "numSearchThread": (0,),
+  "numSearchThread": (-1,),
   #'numMergeWorker': (1,),
   #'numMergeThread': (1,),
   "encoding": ("float32",),
   # 'metric': ('angular',),  # default is angular (dot_product)
   # 'metric': ('mip',),
   #'quantize': (True,),
-  "quantizeBits": (32,),
+  "quantizeBits": (1,),
   # "quantizeBits": (1,),
-  # "overSample": (5,), # extra ratio of vectors to retrieve, for testing approximate scoring, e.g. quantized indices
+  "rerank": ("-", "knn_32bit",),
+  "overSample": (1, 2, 3, 5,), # extra ratio of vectors to retrieve, for testing approximate scoring, e.g. quantized indices
+  # "rerank": ("knn_7bit",),
   #'fanout': (0,),
   "topK": (100,),
   # "bp": ("false", "true"),
@@ -123,9 +125,13 @@ def run_knn_benchmark(checkout, values):
   # query_vectors = '/d/electronics_query_vectors.bin'
 
   # Cohere dataset
-  dim = 768
-  doc_vectors = f"{constants.BASE_DIR}/data/cohere-wikipedia-docs-{dim}d.vec"
-  query_vectors = f"{constants.BASE_DIR}/data/cohere-wikipedia-queries-{dim}d.vec"
+  # dim = 768
+  # doc_vectors = f"{constants.BASE_DIR}/data/cohere-wikipedia-docs-{dim}d.vec"
+  # query_vectors = f"{constants.BASE_DIR}/data/cohere-wikipedia-queries-{dim}d.vec"
+
+  dim = 256
+  doc_vectors = f"{constants.BASE_DIR}/data/asin_vectors.vec"
+  query_vectors = f"{constants.BASE_DIR}/data/query_vectors_new.vec"
   # doc_vectors = f"/lucenedata/enwiki/{'cohere-wikipedia'}-docs-{dim}d.vec"
   # query_vectors = f"/lucenedata/enwiki/{'cohere-wikipedia'}-queries-{dim}d.vec"
   # parentJoin_meta_file = f"{constants.BASE_DIR}/data/{'cohere-wikipedia'}-metadata.csv"
@@ -195,7 +201,7 @@ def run_knn_benchmark(checkout, values):
         str(dim),
         "-docs",
         doc_vectors,
-        "-reindex",
+        # "-reindex",
         "-search-and-stats",
         query_vectors,
         "-numIndexThreads",
@@ -241,7 +247,7 @@ def run_knn_benchmark(checkout, values):
   # TODO: be more careful when we skip/show headers e.g. if some of the runs involve filtering,
   # turn filterType/selectivity back on for all runs
   # skip_headers = {'selectivity', 'filterType', 'visited'}
-  skip_headers = {"selectivity", "filterType", "visited"}
+  skip_headers = {"selectivity", "filterType"}
 
   if "-forceMerge" not in this_cmd:
     skip_headers.add("force_merge(s)")

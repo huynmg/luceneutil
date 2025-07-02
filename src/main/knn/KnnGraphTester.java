@@ -48,12 +48,15 @@ import java.util.concurrent.TimeUnit;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.KnnVectorsReader;
+import org.apache.lucene.codecs.hnsw.DefaultFlatVectorScorer;
 import org.apache.lucene.codecs.lucene103.Lucene103Codec;
+import org.apache.lucene.codecs.lucene99.Lucene99FlatVectorsFormat;
 import org.apache.lucene.codecs.lucene99.Lucene99HnswScalarQuantizedVectorsFormat;
 import org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsFormat;
 import org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader;
 import org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat;
 import org.apache.lucene.codecs.lucene102.Lucene102HnswBinaryQuantizedVectorsFormat;
+import org.apache.lucene.codecs.lucene99.Lucene99ScalarQuantizedVectorsFormat;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.CodecReader;
@@ -86,6 +89,7 @@ import org.apache.lucene.search.ConstantScoreWeight;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnByteVectorQuery;
 import org.apache.lucene.search.KnnFloatVectorQuery;
+import org.apache.lucene.search.RerankFloatVectorQuery;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.QueryVisitor;
@@ -180,6 +184,8 @@ public class KnnGraphTester {
   private IndexType indexType;
   // oversampling, e.g. the multiple * k to gather before checking recall
   private float overSample;
+  
+  private String rerankField;
 
   private KnnGraphTester() {
     // set defaults
@@ -203,6 +209,7 @@ public class KnnGraphTester {
     queryStartIndex = 0;
     indexType = IndexType.HNSW;
     overSample = 1f;
+    rerankField = "";
   }
 
   private static FileChannel getVectorFileChannel(Path path, int dim, VectorEncoding vectorEncoding, boolean noisy) throws IOException {
@@ -289,6 +296,9 @@ public class KnnGraphTester {
             throw new IllegalArgumentException("-fanout requires a following number");
           }
           fanout = Integer.parseInt(args[++iarg]);
+          break;
+        case "-rerank":
+          rerankField = args[++iarg];
           break;
         case "-beamWidthIndex":
           if (iarg == args.length - 1) {
@@ -844,8 +854,10 @@ public class KnnGraphTester {
     Result[] results = new Result[numQueryVectors];
     int[][] resultIds = new int[numQueryVectors][];
     long elapsed, totalCpuTimeMS, totalVisited = 0;
-    int topK = (overSample > 1) ? (int) (this.topK * overSample) : this.topK;
-    int fanout = (overSample > 1) ? (int) (this.fanout * overSample) : this.fanout;
+//    int topK = (overSample > 1) ? (int) (this.topK * overSample) : this.topK;
+//    int fanout = (overSample > 1) ? (int) (this.fanout * overSample) : this.fanout;
+    int topK = this.topK;
+    int fanout = this.fanout;
     ExecutorService executorService;
     if (numSearchThread > 0) {
       executorService = Executors.newFixedThreadPool(numSearchThread, new NamedThreadFactory("hnsw-search"));
@@ -863,7 +875,7 @@ public class KnnGraphTester {
       log("searching " + numQueryVectors + " query vectors; topK=" + topK + ", fanout=" + fanout + "\n");
       long startNS;
       try (MMapDirectory dir = new MMapDirectory(indexPath)) {
-        dir.setPreload((x, ctx) -> x.endsWith(".vec") || x.endsWith(".veq"));
+        dir.setPreload((x, ctx) -> x.endsWith(".vec") || x.endsWith(".veq") || x.endsWith(".veb"));
         try (DirectoryReader reader = DirectoryReader.open(dir)) {
           IndexSearcher searcher = new IndexSearcher(reader, executorService);
           int indexNumDocs = reader.maxDoc();
@@ -952,7 +964,7 @@ public class KnnGraphTester {
       double reindexSec = reindexTimeMsec / 1000.0;
       System.out.printf(
           Locale.ROOT,
-          "SUMMARY: %5.3f\t%5.3f\t%5.3f\t%5.3f\t%d\t%d\t%d\t%d\t%d\t%s\t%d\t%.2f\t%.2f\t%.2f\t%d\t%.2f\t%.2f\t%s\t%5.3f\t%5.3f\t%5.3f\t%s\n",
+          "SUMMARY: %5.3f\t%5.3f\t%5.3f\t%5.3f\t%d\t%d\t%d\t%d\t%d\t%s\t%d\t%.2f\t%.2f\t%.2f\t%d\t%.2f\t%.2f\t%s\t%s\t%5.3f\t%5.3f\t%s\n",
           recall,
           elapsed / (float) numQueryVectors,
           totalCpuTimeMS / (float) numQueryVectors,
@@ -971,7 +983,7 @@ public class KnnGraphTester {
           indexSizeOnDiskMB,
           selectivity,
           prefilter ? "pre-filter" : "post-filter",
-          overSample,
+          Float.toString(overSample) + "- rerank=" + rerankField ,
           vectorDiskSizeBytes / 1024. / 1024.,
           vectorRAMSizeBytes / 1024. / 1024.,
           indexType.toString()
@@ -999,7 +1011,7 @@ public class KnnGraphTester {
     return new Result(docs, profiledQuery.totalVectorCount(), 0);
   }
 
-  private static Result doKnnVectorQuery(
+  private Result doKnnVectorQuery(
       IndexSearcher searcher, String field, float[] vector, int k, int fanout, boolean prefilter, Query filter, boolean isParentJoinQuery)
       throws IOException {
     if (isParentJoinQuery) {
@@ -1007,13 +1019,27 @@ public class KnnGraphTester {
       TopDocs topDocs = searcher.search(parentJoinQuery, k);
       return new Result(topDocs, 0, 0);
     }
-    ProfiledKnnFloatVectorQuery profiledQuery = new ProfiledKnnFloatVectorQuery(field, vector, k, fanout, prefilter ? filter : null);
-    Query query = prefilter ? profiledQuery : new BooleanQuery.Builder()
-            .add(profiledQuery, BooleanClause.Occur.MUST)
+    int sampleK = k * (int)(overSample);
+    Query rerankQuery;
+    if (rerankField.equals("-")) {
+        rerankQuery = new ProfiledKnnFloatVectorQuery(field, vector, sampleK , sampleK, prefilter ? filter : null);
+    } else {
+        ProfiledKnnFloatVectorQuery profiledQuery = new ProfiledKnnFloatVectorQuery(field, vector, sampleK, sampleK, prefilter ? filter : null);
+        rerankQuery = new RerankFloatVectorQuery(profiledQuery, rerankField, vector, k);
+    }
+    Query query = prefilter ? rerankQuery : new BooleanQuery.Builder()
+            .add(rerankQuery, BooleanClause.Occur.MUST)
             .add(filter, BooleanClause.Occur.FILTER)
             .build();
-    TopDocs docs = searcher.search(query, k);
-    return new Result(docs, profiledQuery.totalVectorCount(), 0);
+    
+    TopDocs docs;
+    if (rerankField.equals("-")) {
+      docs = searcher.search(query, sampleK);  
+    } else {
+      docs = searcher.search(query, k);
+    }
+    
+    return new Result(docs, 0, 0);
   }
 
   record Result(TopDocs topDocs, long visitedCount, int reentryCount) {
@@ -1295,6 +1321,19 @@ public class KnnGraphTester {
       return new Lucene103Codec() {
         @Override
         public KnnVectorsFormat getKnnVectorsFormatForField(String field) {
+          if (field.equals("knn_7bit")) {
+            return new Lucene99ScalarQuantizedVectorsFormat(null, 7, false);
+          }
+
+          if (field.equals("knn_4bit")) {
+            return new Lucene99ScalarQuantizedVectorsFormat(null, 4, false);
+          }
+
+          if (field.equals("knn_32bit")) {
+            return new Lucene99HnswVectorsFormat(maxConn, beamWidth, numMergeWorker, null);
+          }
+          
+      
           if (quantize) {
             if (quantizeBits == 1) {
               return switch (indexType) {
@@ -1311,8 +1350,22 @@ public class KnnGraphTester {
       };
     } else {
       return new Lucene103Codec() {
+        
+        
         @Override
         public KnnVectorsFormat getKnnVectorsFormatForField(String field) {
+          if (field.equals("knn_7bit")) {
+            return new Lucene99ScalarQuantizedVectorsFormat(null, 7, false);
+          }
+
+          if (field.equals("knn_4bit")) {
+            return new Lucene99ScalarQuantizedVectorsFormat(null, 4, false);
+          }
+
+          if (field.equals("knn_32bit")) {
+            return new Lucene99HnswVectorsFormat(maxConn, beamWidth, numMergeWorker, null);
+          }
+          
           if (quantize) {
             if (quantizeBits == 1) {
               return switch (indexType) {

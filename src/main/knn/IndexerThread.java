@@ -88,11 +88,17 @@ class IndexerThread extends Thread {
             byte[] bytes = ((VectorReaderByte) vectorReader).nextBytes();
             System.arraycopy(bytes, 0, byteVectorBuffer, 0, bytes.length);
             doc.add(new KnnByteVectorField(KnnGraphTester.KNN_FIELD, byteVectorBuffer, fieldType));
+            doc.add(new KnnFloatVectorField("knn_4bit", floatVectorBuffer, fieldType));
+            doc.add(new KnnFloatVectorField("knn_7bit", floatVectorBuffer, fieldType));
+            doc.add(new KnnFloatVectorField("knn_32bit", floatVectorBuffer, fieldType));
           }
           case FLOAT32 -> {
             float[] floats = vectorReader.next();
             System.arraycopy(floats, 0, floatVectorBuffer, 0, floats.length);
             doc.add(new KnnFloatVectorField(KnnGraphTester.KNN_FIELD, floatVectorBuffer, fieldType));
+            doc.add(new KnnFloatVectorField("knn_4bit", floatVectorBuffer, fieldType));
+            doc.add(new KnnFloatVectorField("knn_7bit", floatVectorBuffer, fieldType));
+            doc.add(new KnnFloatVectorField("knn_32bit", floatVectorBuffer, fieldType));
           }
         }
 
