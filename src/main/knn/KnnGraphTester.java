@@ -195,6 +195,8 @@ public class KnnGraphTester implements FormatterLogger {
   private IndexType indexType;
   // oversampling, e.g. the multiple * k to gather before checking recall
   private float overSample;
+  // whether to use flat mode (all nodes on level 0) for HNSW
+  private boolean flatMode;
 
   private KnnGraphTester() {
     // set defaults
@@ -218,6 +220,7 @@ public class KnnGraphTester implements FormatterLogger {
     queryStartIndex = 0;
     indexType = IndexType.HNSW;
     overSample = 1f;
+    flatMode = false;
   }
 
   private static FileChannel getVectorFileChannel(Path path, int dim, VectorEncoding vectorEncoding, boolean noisy) throws IOException {
@@ -498,6 +501,10 @@ public class KnnGraphTester implements FormatterLogger {
         case "-bp":
           useBp = Boolean.parseBoolean(args[++iarg]);
           break;
+        case "-flatMode":
+          flatMode = Boolean.parseBoolean(args[++iarg]);
+          log("flatMode = %s\n", flatMode);
+          break;
         case "-seed":
           randomSeed = Long.parseLong(args[++iarg]);
           break;
@@ -531,7 +538,7 @@ public class KnnGraphTester implements FormatterLogger {
     String indexKey = formatIndexKey(indexType, maxConn, beamWidth, useBp,
                                      quantize, quantizeBits, quantizeCompress,
                                      parentJoin, filterStrategy, filterSelectivity, randomSeed,
-                                     docVectorsPath, numDocs, metric, forceMerge);
+                                     docVectorsPath, numDocs, metric, forceMerge, flatMode);
     log("index key = %s\n", indexKey);
     
     if (indexPath == null) {
@@ -594,7 +601,7 @@ public class KnnGraphTester implements FormatterLogger {
       reindexTimeMsec = new KnnIndexer(
         docVectorsPath,
         indexPath,
-        getCodec(maxConn, beamWidth, exec, numMergeWorker, quantize, quantizeBits, indexType),
+        getCodec(maxConn, beamWidth, exec, numMergeWorker, quantize, quantizeBits, indexType, flatMode),
         numIndexThreads,
         vectorEncoding,
         dim,
@@ -853,7 +860,8 @@ public class KnnGraphTester implements FormatterLogger {
                                        boolean quantize, int quantizeBits, boolean quantizeCompress,
                                        boolean parentJoin, FilterStrategy filterStrategy,
                                        Float filterSelectivity, Long randomSeed,
-                                       Path docPath, int numDocs, String metric, boolean forceMerge)
+                                       Path docPath, int numDocs, String metric, boolean forceMerge,
+                                       boolean flatMode)
     throws IOException {
 
     List<String> suffix = new ArrayList<>();
@@ -887,6 +895,9 @@ public class KnnGraphTester implements FormatterLogger {
       suffix.add(Integer.toString(beamWidth));
       if (useBp) {
         suffix.add("bp");
+      }
+      if (flatMode) {
+        suffix.add("flatMode");
       }
     }
     if (quantize) {
@@ -983,7 +994,7 @@ public class KnnGraphTester implements FormatterLogger {
   @SuppressForbidden(reason = "Prints stuff")
   private double forceMerge() throws IOException, InterruptedException {
     IndexWriterConfig iwc = new IndexWriterConfig().setOpenMode(IndexWriterConfig.OpenMode.APPEND);
-    iwc.setCodec(getCodec(maxConn, beamWidth, exec, numMergeWorker, quantize, quantizeBits, indexType));
+    iwc.setCodec(getCodec(maxConn, beamWidth, exec, numMergeWorker, quantize, quantizeBits, indexType, flatMode));
     KnnIndexer.TrackingConcurrentMergeScheduler tcms = new KnnIndexer.TrackingConcurrentMergeScheduler();
     iwc.setMergeScheduler(tcms);
     KnnIndexer.TrackingTieredMergePolicy ttmp = new KnnIndexer.TrackingTieredMergePolicy();
@@ -1202,7 +1213,7 @@ public class KnnGraphTester implements FormatterLogger {
       double reindexSec = reindexTimeMsec / 1000.0;
       System.out.printf(
           Locale.ROOT,
-          "SUMMARY: %5.3f\t%5.3f\t%5.3f\t%5.3f\t%d\t%d\t%d\t%d\t%d\t%s\t%d\t%.2f\t%.2f\t%.2f\t%d\t%.2f\t%s\t%s\t%5.3f\t%5.3f\t%5.3f\t%s\t%s\n",
+          "SUMMARY: %5.3f\t%5.3f\t%5.3f\t%5.3f\t%d\t%d\t%d\t%d\t%d\t%s\t%d\t%.2f\t%.2f\t%.2f\t%d\t%.2f\t%s\t%s\t%5.3f\t%5.3f\t%5.3f\t%s\t%s\t%s\n",
           recall,
           elapsedMS / (float) numQueryVectors,
           totalCpuTimeMS / (float) numQueryVectors,
@@ -1225,7 +1236,8 @@ public class KnnGraphTester implements FormatterLogger {
           vectorDiskSizeBytes / 1024. / 1024.,
           vectorRAMSizeBytes / 1024. / 1024.,
           Boolean.valueOf(useBp).toString(),
-          indexType.toString()
+          indexType.toString(),
+          Boolean.valueOf(flatMode).toString()
         );
     }
   }
@@ -1697,7 +1709,7 @@ public class KnnGraphTester implements FormatterLogger {
     }
   }
 
-  static Codec getCodec(int maxConn, int beamWidth, ExecutorService exec, int numMergeWorker, boolean quantize, int quantizeBits, IndexType indexType) {
+  static Codec getCodec(int maxConn, int beamWidth, ExecutorService exec, int numMergeWorker, boolean quantize, int quantizeBits, IndexType indexType, boolean flatMode) {
     return new Lucene104Codec() {
       @Override
       public KnnVectorsFormat getKnnVectorsFormatForField(String field) {
@@ -1722,7 +1734,7 @@ public class KnnGraphTester implements FormatterLogger {
             default -> throw new IllegalArgumentException("Unsupported quantizeBits: " + quantizeBits);
           };
         } else {
-          return new Lucene99HnswVectorsFormat(maxConn, beamWidth, numMergeWorker, exec);
+          return new Lucene99HnswVectorsFormat(maxConn, beamWidth, flatMode);
         }
       }
     };
